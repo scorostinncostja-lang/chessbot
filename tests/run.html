@@ -1,0 +1,35 @@
+<!doctype html><meta charset="utf-8"><title>vision tests</title>
+<pre id="out">running…</pre>
+<script type="module">
+import { Chess } from '../vendor/chess.js';
+import { loadImage, detectBoard, extractFeatures, recognize } from '../js/vision.js';
+const out = document.getElementById('out');
+const cases = await (await fetch('fixtures/cases.json')).json();
+const log = [];
+let ok = 0, total = 0;
+const t0 = performance.now();
+for (const c of cases) {
+  const chess = new Chess(); const pool = []; let tag = 0; let fails = 0; let hint = null;
+  for (const s of c.shots) {
+    const img = await loadImage(await (await fetch('fixtures/' + s.img)).blob());
+    const ta = performance.now();
+    const box = detectBoard(img, hint); hint = box;
+    const tb = performance.now();
+    const feats = extractFeatures(img, box, c.color === 'b');
+    const res = recognize(feats, chess, pool, ++tag);
+    const tc = performance.now();
+    for (const m of res.moves) chess.move(m);
+    const got = chess.fen().split(' ')[0];
+    total++;
+    if (got === s.fen) ok++;
+    else {
+      fails++;
+      log.push(`FAIL ${s.img}: got ${got} want ${s.fen} moves=${res.moves.map(m=>m.san)} score=${res.score.toFixed(2)} margin=${res.margin.toFixed(2)}`);
+      // восстанавливаемся на правильную позицию, чтобы видеть остальные ошибки
+      chess.load(s.fen + ' ' + (chess.turn()) + ' - - 0 1', { skipValidation: true });
+    }
+    log.push(`${s.img} box=${[box.x,box.y,box.size].map(v=>v.toFixed(0))} detect=${(tb-ta).toFixed(0)}ms recog=${(tc-tb).toFixed(0)}ms margin=${res.margin.toFixed(2)} unc=${res.uncertain}`);
+  }
+}
+out.textContent = `RESULT ${ok}/${total} in ${((performance.now()-t0)/1000).toFixed(1)}s\n` + log.join('\n');
+</script>

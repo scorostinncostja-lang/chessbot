@@ -44,7 +44,7 @@
           <div id="hint-sub"></div>
           <div class="hint-meta"><span id="eval-text"></span><span id="depth"></span></div>
           <button id="btn-played" class="cta" type="button" hidden>✓ Сделал ход</button>
-          <button id="btn-opp" class="cta cta-opp" type="button" hidden>Соперник сыграл так</button>
+          <button id="btn-opp" type="button" hidden></button>
         </div>
       </div>
 
@@ -80,15 +80,11 @@
         <div class="seg-row"><span>Время на ход</span>
           <div class="seg"><button type="button" data-think="2000">2 с</button><button type="button" data-think="5000">5 с</button><button type="button" data-think="15000">15 с</button><button type="button" data-think="30000">30 с</button><button type="button" data-think="0">∞</button></div>
         </div>
-        <div class="seg-row"><span>Вариантов</span>
-          <div class="seg"><button type="button" data-multipv="1">1</button><button type="button" data-multipv="2">2</button><button type="button" data-multipv="3">3</button></div>
-        </div>
       </div>
 
       <div class="card">
-        <h2>Лучшие варианты</h2>
+        <h2>Главный вариант</h2>
         <ol id="lines" class="lines"></ol>
-        <p class="small">Тап по варианту — сыграть его первый ход.</p>
       </div>
 
       <div class="card">
@@ -122,13 +118,13 @@
         <details>
           <summary>Как играть против бота</summary>
           <ol class="steps">
-            <li>Выбери цвет. Если позиция не с начала — «Расставить».</li>
-            <li>Твой ход: сходи в игре по оранжевой стрелке → «✓ Сделал ход».</li>
-            <li>Ход соперника: передвинь его фигуру на доске (тап-тап или перетаскивание). Если он сыграл как синяя стрелка — одна кнопка.</li>
-            <li>Ошибся — «← Назад».</li>
-            <li>Против сильного движка ставь 15–30 с или ∞ и жми кнопку, когда глубина перестанет расти.</li>
+            <li>Выбери цвет. Если партия не с начала — «Расставить».</li>
+            <li>Движок сам ставит твой ход на доску и подсвечивает оранжевым клетку «откуда» и «куда». Повтори этот ход в игре.</li>
+            <li>Передвинь фигуру соперника так, как он сходил: тап-тап или перетаскивание.</li>
+            <li>Ошибся при вводе — «← Назад».</li>
+            <li>Против сильного движка ставь 15–30 с.</li>
           </ol>
-          <p class="small">ПК: ← → — назад/вперёд, Enter — подтвердить ход, F — перевернуть.</p>
+          <p class="small">ПК: ← → — назад/вперёд, Enter — ходить сейчас, F — перевернуть.</p>
         </details>
       </div>
     </section>

@@ -62,7 +62,10 @@ export class Engine {
    * onInfo(lines) — lines[i] = {depth, cp, mate, pv[], nps}; оценка с точки зрения стороны, которая ходит
    */
   async analyze(fen, opts, onInfo) {
-    await this.stop();
+    // запросы могут прилетать пачкой — выполняем только самый свежий
+    const id = this.reqId = (this.reqId || 0) + 1;
+    while (this.busy) await this.stop();
+    if (id !== this.reqId) return { bestmove: null, lines: [], cancelled: true };
     const mpv = opts.multipv || 1;
     if (mpv !== this.multipv) { this.send(`setoption name MultiPV value ${mpv}`); this.multipv = mpv; }
     const lines = [];

@@ -17,7 +17,6 @@ const store = {
 const S = {
   color: store.get('color', 'w'),     // за кого играет пользователь
   think: store.get('think', 5000),    // мс на ход, 0 = без ограничения
-  multipv: store.get('multipv', 3),
   flip: false,                        // ручной переворот доски
   mode: 'play',                       // 'play' | 'edit'
   chess: new Chess(),
@@ -25,6 +24,7 @@ const S = {
   redo: [],
   selected: null,
   an: { fen: null, lines: [], done: false },
+  autoMoves: new Map(),   // ходы, которые поставил движок: 'fen|lan' -> {fen, move, lines}
   token: 0,
   engineReady: false,
   build: null,
@@ -121,7 +121,19 @@ function renderBoard() {
   const marks = {};
   const add = (sq, cls) => { (marks[sq] ||= []).push(cls); };
   const h = c.history({ verbose: true });
-  if (h.length) { add(h.at(-1).from, 'last'); add(h.at(-1).to, 'last'); }
+  const last = h.at(-1);
+  if (last) {
+    // твой (авто) ход — оранжевым, ход соперника — жёлтым
+    const mine = last.color === S.color;
+    add(last.from, mine ? 'mine-from' : 'last');
+    add(last.to, mine ? 'mine-to' : 'last');
+  }
+  // пока движок думает — показываем текущий лучший ход клетками
+  if (c.turn() === S.color && S.an.fen === c.fen() && S.an.lines[0]) {
+    const uci = S.an.lines[0].pv[0];
+    add(uci.slice(0, 2), 'mine-from');
+    add(uci.slice(2, 4), 'mine-to');
+  }
   if (S.selected) {
     add(S.selected, 'sel');
     for (const m of c.moves({ square: S.selected, verbose: true })) add(m.to, c.get(m.to) ? 'capture' : 'target');
@@ -130,21 +142,7 @@ function renderBoard() {
     const k = Object.entries(piecesFromChess(c)).find(([, v]) => v === c.turn() + 'k');
     if (k) add(k[0], 'check');
   }
-  view.set(piecesFromChess(c), marks, arrowsFromAnalysis());
-}
-
-function arrowsFromAnalysis() {
-  if (S.mode !== 'play' || S.an.fen !== S.chess.fen()) return [];
-  const mine = S.chess.turn() === S.color;
-  const out = [];
-  S.an.lines.forEach((l, i) => {
-    if (!l.pv[0]) return;
-    if (!mine && i > 0) return;
-    const kind = !mine ? 'opp' : i === 0 ? 'best' : 'alt';
-    out.push({ from: l.pv[0].slice(0, 2), to: l.pv[0].slice(2, 4), kind });
-  });
-  // не рисуем вторую стрелку поверх главной
-  return out.filter((a, i) => i === 0 || !(a.from === out[0].from && a.to === out[0].to));
+  view.set(piecesFromChess(c), marks, []);
 }
 
 // ---------- Режим партии: ввод ходов ----------
@@ -238,30 +236,44 @@ async function analyze() {
   const fen = S.chess.fen();
   S.an = { fen, lines: [], done: false };
   renderHint();
-  if (S.mode !== 'play' || gameOverText()) { if (engine) engine.stop(); return; }
+  const mine = S.chess.turn() === S.color;
+  if (S.mode !== 'play' || gameOverText() || !mine) { if (engine) engine.stop(); return; }
   if (!S.engineReady) return;
-  const opts = S.think ? { movetime: S.think, multipv: S.multipv } : { infinite: true, multipv: S.multipv };
+  const opts = S.think ? { movetime: S.think, multipv: 1 } : { infinite: true, multipv: 1 };
   let last = 0;
   try {
     const res = await engine.analyze(fen, opts, (lines) => {
       if (token !== S.token) return;
       S.an.lines = lines;
       const now = performance.now();
-      if (now - last > 120) { last = now; renderAnalysis(); }
+      if (now - last > 150) { last = now; renderAnalysis(); }
     });
-    if (token !== S.token) return;
+    if (token !== S.token || res.cancelled) return;
     if (res.lines.length) S.an.lines = res.lines;
     S.an.done = true;
-    renderAnalysis();
-    if (S.chess.turn() === S.color && navigator.vibrate) navigator.vibrate(25);
+    // ход готов — сразу ставим его на доску
+    const uci = res.bestmove && res.bestmove !== '(none)' ? res.bestmove : S.an.lines[0]?.pv[0];
+    if (uci) playEngineMove(uci);
+    else renderAnalysis();
   } catch (e) {
     console.error(e);
     if (token === S.token) setEngineStatus('Движок не ответил — обнови страницу', true);
   }
 }
 
+function playEngineMove(uci) {
+  const fen = S.chess.fen();
+  const m = uciToMove(fen, uci);
+  if (!m) return;
+  S.autoMoves.set(fen + '|' + m.lan, { fen, move: m, lines: S.an.lines });
+  S.token++;
+  if (engine) engine.stop();
+  applyMove({ from: m.from, to: m.to, promotion: m.promotion });
+  if (navigator.vibrate) navigator.vibrate([40, 60, 40]);
+}
+
 function renderAnalysis() {
-  view.setArrows(arrowsFromAnalysis());
+  renderBoard();
   renderHint();
   renderLines();
 }
@@ -272,16 +284,23 @@ function bestMove() {
   return uciToMove(S.an.fen, l.pv[0]);
 }
 
+// последний ход партии — это ход, который поставил движок?
+function lastAutoMove() {
+  const h = S.chess.history({ verbose: true });
+  const last = h.at(-1);
+  return last ? S.autoMoves.get(last.before + '|' + last.lan) || null : null;
+}
+
 function renderHint() {
   const over = gameOverText();
   const hint = $('hint');
-  const best = bestMove();
   const mine = S.chess.turn() === S.color;
-  const l0 = S.an.fen === S.chess.fen() ? S.an.lines[0] : null;
-  const ev = l0 ? evalFor(l0, S.an.fen) : null;
+  const auto = !mine ? lastAutoMove() : null;
+  const evLine = mine ? (S.an.fen === S.chess.fen() ? S.an.lines[0] : null) : auto?.lines[0];
+  const ev = evLine ? evalFor(evLine, mine ? S.an.fen : auto.fen) : null;
   $('eval-fill').style.height = ev ? (ev.frac * 100).toFixed(1) + '%' : '50%';
   $('eval-text').textContent = ev ? `${ev.text} · ${verdict(ev.cp)}` : '';
-  $('depth').textContent = l0 ? `глубина ${l0.depth}${l0.nps ? ` · ${(l0.nps / 1e6).toFixed(1)} млн поз/с` : ''}` : '';
+  $('depth').textContent = evLine ? `глубина ${evLine.depth}${evLine.nps ? ` · ${(evLine.nps / 1e6).toFixed(1)} млн поз/с` : ''}` : '';
   $('btn-played').hidden = true;
   $('btn-opp').hidden = true;
 
@@ -296,7 +315,7 @@ function renderHint() {
     hint.dataset.kind = 'over';
     $('hint-label').textContent = 'Партия окончена';
     $('hint-title').textContent = over;
-    $('hint-sub').textContent = 'Нажми «Новая», чтобы сыграть ещё.';
+    $('hint-sub').textContent = 'Нажми «Новая партия», чтобы сыграть ещё.';
     return;
   }
   if (!S.engineReady) {
@@ -307,35 +326,37 @@ function renderHint() {
     return;
   }
   if (mine) {
-    hint.dataset.kind = best ? (S.an.done ? 'move' : 'think') : 'think';
-    $('hint-label').textContent = S.an.done || !S.think ? 'Твой ход — лучший' : 'Твой ход — считаю…';
+    const best = bestMove();
+    hint.dataset.kind = 'think';
+    $('hint-label').textContent = 'Думаю над твоим ходом…';
     $('hint-title').textContent = best ? moveText(best) : 'Считаю…';
-    $('hint-sub').textContent = best ? `${best.san} · сходи так в игре и нажми кнопку` : '';
-    if (best) { $('btn-played').hidden = false; $('btn-played').textContent = `✓ Сделал ход ${best.san}`; }
+    $('hint-sub').textContent = S.think ? 'Ход поставлю сам, как досчитаю.' : 'Режим ∞: нажми кнопку, когда глубина перестанет расти.';
+    if (best) { $('btn-played').hidden = false; $('btn-played').textContent = `Ходить сейчас: ${best.san}`; }
+  } else if (auto) {
+    hint.dataset.kind = 'move';
+    $('hint-label').textContent = 'Сходи в игре';
+    $('hint-title').textContent = moveText(auto.move);
+    $('hint-sub').textContent = `${auto.move.san} · клетка «откуда» и «куда» подсвечены. Потом введи ответ соперника на доске.`;
   } else {
     hint.dataset.kind = 'opp';
     $('hint-label').textContent = 'Ход соперника';
     $('hint-title').textContent = 'Введи ход соперника';
-    $('hint-sub').textContent = best
-      ? `Скорее всего он сыграет ${best.san} (синяя стрелка). Если сходил иначе — передвинь его фигуру на доске.`
-      : 'Тапни его фигуру и клетку, куда она пошла, или перетащи. Можно скинуть скриншот.';
-    if (best) { $('btn-opp').hidden = false; $('btn-opp').textContent = `Соперник сыграл ${best.san}`; }
+    $('hint-sub').textContent = 'Тапни его фигуру и клетку, куда она пошла, или перетащи.';
   }
 }
 
 function renderLines() {
   const list = $('lines');
   list.replaceChildren();
-  if (S.an.fen !== S.chess.fen()) return;
-  S.an.lines.forEach((l, i) => {
-    const ev = evalFor(l, S.an.fen);
-    const san = pvToSan(S.an.fen, l.pv);
+  const cur = S.an.fen === S.chess.fen();
+  const auto = lastAutoMove();
+  const src = cur && S.an.lines.length ? S.an : auto ? { fen: auto.fen, lines: auto.lines } : null;
+  if (!src) return;
+  src.lines.slice(0, 1).forEach((l) => {
+    const ev = evalFor(l, src.fen);
+    const san = pvToSan(src.fen, l.pv, 10);
     const li = document.createElement('li');
-    li.innerHTML = `<button type="button" class="line${i === 0 ? ' top' : ''}"><span class="ev">${ev.text}</span><span class="pv"><b>${san[0] || ''}</b> ${san.slice(1).join(' ')}</span></button>`;
-    li.firstChild.onclick = () => {
-      const m = uciToMove(S.an.fen, l.pv[0]);
-      if (m) applyMove({ from: m.from, to: m.to, promotion: m.promotion });
-    };
+    li.innerHTML = `<div class="line top"><span class="ev">${ev.text}</span><span class="pv"><b>${san[0] || ''}</b> ${san.slice(1).join(' ')}</span></div>`;
     list.append(li);
   });
 }
@@ -362,7 +383,6 @@ function renderAll() {
   list.scrollTop = list.scrollHeight;
   document.querySelectorAll('[data-color]').forEach(b => b.setAttribute('aria-pressed', b.dataset.color === S.color));
   document.querySelectorAll('[data-think]').forEach(b => b.setAttribute('aria-pressed', +b.dataset.think === S.think));
-  document.querySelectorAll('[data-multipv]').forEach(b => b.setAttribute('aria-pressed', +b.dataset.multipv === S.multipv));
   $('undo').disabled = h.length === 0;
   $('redo').disabled = S.redo.length === 0;
   renderEditor();
@@ -485,15 +505,16 @@ function newGame() {
 }
 
 $('btn-played').onclick = () => {
-  const m = bestMove();
-  if (m) applyMove({ from: m.from, to: m.to, promotion: m.promotion });
+  const l = S.an.lines[0];
+  if (l && S.an.fen === S.chess.fen()) playEngineMove(l.pv[0]);
 };
-$('btn-opp').onclick = $('btn-played').onclick;
 $('new').onclick = newGame;
 $('undo').onclick = () => {
   const m = S.chess.undo();
   if (!m) return;
   S.redo.push(m);
+  // иначе движок тут же снова сходит за тебя — откатываем и твой ход
+  if (S.chess.turn() === S.color && S.chess.history().length) S.redo.push(S.chess.undo());
   if (S.vis.lastRecog) dropShot(S.vis.lastRecog.tag);
   S.vis.lastRecog = null;
   S.selected = null;
@@ -524,11 +545,6 @@ document.querySelectorAll('[data-color]').forEach(b => b.onclick = () => {
 document.querySelectorAll('[data-think]').forEach(b => b.onclick = () => {
   S.think = +b.dataset.think;
   store.set('think', S.think);
-  positionChanged();
-});
-document.querySelectorAll('[data-multipv]').forEach(b => b.onclick = () => {
-  S.multipv = +b.dataset.multipv;
-  store.set('multipv', S.multipv);
   positionChanged();
 });
 $('copy-fen').onclick = async () => {

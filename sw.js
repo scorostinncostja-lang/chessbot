@@ -3,7 +3,7 @@
 // 2) добавляет заголовки COOP/COEP — включает crossOriginIsolated,
 //    без которого браузер не даёт SharedArrayBuffer многопоточному Stockfish
 //    (GitHub Pages сам такие заголовки ставить не умеет).
-const CACHE = 'chessbot-v3';
+const CACHE = 'chessbot-v4';
 const CORE = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest',
   'js/app.js', 'js/board.js', 'js/engine.js', 'js/vision.js', 'js/pieces.js', 'vendor/chess.js',

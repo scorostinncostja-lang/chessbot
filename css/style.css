@@ -85,6 +85,9 @@ body[data-mode="edit"] .play-only { display: none; }
 .sq.dark { background: var(--sq-dark); }
 .sq.last::before, .sq.sel::before, .sq.hover::before, .sq.check::before { content: ""; position: absolute; inset: 0; }
 .sq.last::before { background: var(--sq-last); }
+.sq.mine-from::before, .sq.mine-to::before { content: ""; position: absolute; inset: 0; }
+.sq.mine-from::before { background: color-mix(in srgb, var(--accent) 35%, transparent); box-shadow: inset 0 0 0 3px var(--accent); }
+.sq.mine-to::before { background: color-mix(in srgb, var(--accent) 62%, transparent); box-shadow: inset 0 0 0 4px var(--accent); }
 .sq.sel::before { background: rgba(40, 120, 255, .38); }
 .sq.hover::before { box-shadow: inset 0 0 0 4px rgba(255,255,255,.7); }
 .sq.check::before { background: radial-gradient(circle, rgba(255,0,0,.8) 0%, rgba(255,0,0,0) 72%); }
